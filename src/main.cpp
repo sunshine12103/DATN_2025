@@ -1,18 +1,114 @@
-#include <Arduino.h>
+#include "Arduino.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <60ghzbreathheart.h>
 
-// put function declarations here:
-int myFunction(int, int);
+BreathHeart_60GHz radar = BreathHeart_60GHz(&Serial2);
+WiFiClient espClient;
+PubSubClient client(espClient);
+const char* ssid = "Fuvitech";
+const char* password = "fuvitech.vn";
+const char* mqtt_server = "mqtt.fuvitech.vn";
+const int mqtt_port = 2883;
+const char* topic = "Duong/ReadSensor";
+const char* mqtt_client_id = "ESP32RADARClient";
+
+int latestHeartRate = 0;
+int latestRespirationRate = 0;
+unsigned long lastRadarUpdate = 0;
+unsigned long lastMqttPublish = 0;
+const unsigned long radarInterval = 1000;
+const unsigned long mqttInterval = 30000;
+
+void connectToWiFi() {
+  Serial.println("Connecting to WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000); 
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected.");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void connectToMQTT() {
+  client.setServer(mqtt_server, mqtt_port);
+  while (!client.connected()) {
+    Serial.println("Connecting to MQTT...");
+    if (client.connect(mqtt_client_id)) {
+      Serial.println("Connected to MQTT.");
+    } else {
+      Serial.print("Failed to connect. Error code: ");
+      Serial.print(client.state());
+      Serial.println(". Retrying in 5 seconds...");
+      delay(5000);
+    }
+  }
+}
+
+void publishSensorData(int heartRate, int respirationRate) {
+  StaticJsonDocument<256> jsonDoc;
+  jsonDoc["HeartRate"] = heartRate;
+  jsonDoc["RespirationRate"] = respirationRate;
+
+  char buffer[256];
+  serializeJson(jsonDoc, buffer);
+
+  if (client.publish(topic, buffer)) {
+    Serial.print("Data published to MQTT: ");
+    Serial.println(buffer);
+  } else {
+    Serial.println("Failed to publish data.");
+  }
+}
 
 void setup() {
-  // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+  Serial.begin(115200);
+  Serial2.begin(115200, SERIAL_8N1, 16, 17);
+  while (!Serial);
+
+  Serial.println("Radar R60ABD1 Initialized");
+
+  connectToWiFi();
+  connectToMQTT();
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-}
 
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
+  if (!client.connected()) {
+    connectToMQTT();
+  }
+  client.loop();
+  unsigned long currentTime = millis();
+  if (currentTime - lastRadarUpdate >= radarInterval) {
+    radar.Breath_Heart(); 
+
+    if (radar.sensor_report != 0x00) {
+      if (radar.sensor_report == HEARTRATEVAL && radar.heart_rate > 0) {
+        latestHeartRate = radar.heart_rate;
+        Serial.print("Heart Rate: ");
+        Serial.print(latestHeartRate);
+        Serial.println(" bpm");
+      }
+      if (radar.sensor_report == BREATHVAL && radar.breath_rate > 0) {
+        latestRespirationRate = radar.breath_rate;
+        Serial.print("Respiration Rate: ");
+        Serial.print(latestRespirationRate);
+        Serial.println(" breaths/min");
+      }
+    }
+
+    lastRadarUpdate = currentTime;
+  }
+
+  if (currentTime - lastMqttPublish >= mqttInterval) {
+    if (latestHeartRate > 0 || latestRespirationRate > 0) {
+      publishSensorData(latestHeartRate, latestRespirationRate);
+    } else {
+      Serial.println("No valid data to publish.");
+    }
+    lastMqttPublish = currentTime;
+  }
 }
