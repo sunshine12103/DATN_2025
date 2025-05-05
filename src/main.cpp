@@ -7,6 +7,7 @@
 BreathHeart_60GHz radar = BreathHeart_60GHz(&Serial2);
 WiFiClient espClient;
 PubSubClient client(espClient);
+
 const char* ssid = "Fuvitech";
 const char* password = "fuvitech.vn";
 const char* mqtt_server = "mqtt.fuvitech.vn";
@@ -16,10 +17,20 @@ const char* mqtt_client_id = "ESP32RADARClient";
 
 int latestHeartRate = 0;
 int latestRespirationRate = 0;
+float latestHeight = 0; 
+float latestWeight = 0; 
+String latestGender = ""; 
 unsigned long lastRadarUpdate = 0;
 unsigned long lastMqttPublish = 0;
-const unsigned long radarInterval = 1000;
-const unsigned long mqttInterval = 30000;
+const unsigned long radarInterval = 1000; 
+const unsigned long mqttInterval = 30000; 
+
+
+void generateRandomData() {
+  latestHeight = random(1500, 2001) / 10.0; 
+  latestWeight = random(400, 1201) / 10.0;
+  latestGender = (random(0, 2) == 0) ? "Male" : "Female";
+}
 
 void connectToWiFi() {
   Serial.println("Connecting to WiFi...");
@@ -48,10 +59,13 @@ void connectToMQTT() {
   }
 }
 
-void publishSensorData(int heartRate, int respirationRate) {
+void publishSensorData(int heartRate, int respirationRate, float height, float weight, String gender) {
   StaticJsonDocument<256> jsonDoc;
   jsonDoc["HeartRate"] = heartRate;
   jsonDoc["RespirationRate"] = respirationRate;
+  jsonDoc["Height"] = height;
+  jsonDoc["Weight"] = weight;
+  jsonDoc["Gender"] = gender;
 
   char buffer[256];
   serializeJson(jsonDoc, buffer);
@@ -66,10 +80,13 @@ void publishSensorData(int heartRate, int respirationRate) {
 
 void setup() {
   Serial.begin(115200);
-  Serial2.begin(115200, SERIAL_8N1, 16, 17);
+  Serial2.begin(115200, SERIAL_8N1, 16, 17); 
   while (!Serial);
 
   Serial.println("Radar R60ABD1 Initialized");
+
+
+  randomSeed(analogRead(0));
 
   connectToWiFi();
   connectToMQTT();
@@ -81,9 +98,11 @@ void loop() {
     connectToMQTT();
   }
   client.loop();
+
+ 
   unsigned long currentTime = millis();
   if (currentTime - lastRadarUpdate >= radarInterval) {
-    radar.Breath_Heart(); 
+    radar.Breath_Heart();
 
     if (radar.sensor_report != 0x00) {
       if (radar.sensor_report == HEARTRATEVAL && radar.heart_rate > 0) {
@@ -103,11 +122,25 @@ void loop() {
     lastRadarUpdate = currentTime;
   }
 
+
   if (currentTime - lastMqttPublish >= mqttInterval) {
-    if (latestHeartRate > 0 || latestRespirationRate > 0) {
-      publishSensorData(latestHeartRate, latestRespirationRate);
+    if (latestHeartRate > 0 || latestRespirationRate > 0) { 
+     
+      generateRandomData();
+      
+  
+      publishSensorData(latestHeartRate, latestRespirationRate, latestHeight, latestWeight, latestGender);
+      
+      Serial.print("Height: ");
+      Serial.print(latestHeight);
+      Serial.println(" cm");
+      Serial.print("Weight: ");
+      Serial.print(latestWeight);
+      Serial.println(" kg");
+      Serial.print("Gender: ");
+      Serial.println(latestGender);
     } else {
-      Serial.println("No valid data to publish.");
+      Serial.println("No valid radar data to publish.");
     }
     lastMqttPublish = currentTime;
   }
