@@ -13,6 +13,13 @@ BreathHeart_60GHz radar = BreathHeart_60GHz(&Serial2);
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 DHT dht(DHT22, DHT22); 
 
+#define MAX_SAMPLES 60
+int heartRateSamples[MAX_SAMPLES];
+int breathRateSamples[MAX_SAMPLES];
+int sampleCount = 0;
+unsigned long lastSampleTime = 0;
+const unsigned long sampleInterval = 1000;
+
 int latestHeartRate = 0;
 int latestRespirationRate = 0;
 int latestDistance = 0; 
@@ -23,20 +30,21 @@ const unsigned long radarInterval = 1000;
 const unsigned long displayInterval = 500;
 unsigned long lastDisplayUpdate = 0;
 U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R2, /* clock=*/ 18, /* data=*/ 23, /* CS=*/ 5, /* reset=*/ 22);
+int average(int* arr, int count);
 void updateDisplay() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_ncenB08_tr);
   u8g2.drawStr(5, 8, "RADAR R60ABD1");
   u8g2.drawHLine(0, 10, 128);
-  u8g2.setFont(u8g2_font_ncenB08_tr);
+
   u8g2.drawStr(5, 20, "Nhip tim:");
-  char heartRateStr[10];
-  sprintf(heartRateStr, "%d bpm", latestHeartRate);
+  char heartRateStr[16];
+  sprintf(heartRateStr, "%d bpm", average(heartRateSamples, sampleCount));
   u8g2.drawStr(70, 20, heartRateStr);
-  
+
   u8g2.drawStr(5, 30, "Nhip tho:");
-  char respRateStr[10];
-  sprintf(respRateStr, "%d rpm", latestRespirationRate);
+  char respRateStr[16];
+  sprintf(respRateStr, "%d rpm", average(breathRateSamples, sampleCount));
   u8g2.drawStr(70, 30, respRateStr);
   u8g2.drawStr(5, 40, "Chieu cao:");
   char distanceStr[10];
@@ -53,6 +61,7 @@ void updateDisplay() {
   u8g2.drawStr(70, 60, humStr);
   u8g2.sendBuffer();
 }
+
 void setup() {
   Serial.begin(115200);
   Serial2.begin(115200, SERIAL_8N1, 16, 17);
@@ -158,9 +167,33 @@ void loop() {
         break;
     }
   }
+  // Lấy mẫu mỗi 1 giây
+  if (millis() - lastSampleTime >= sampleInterval) {
+    if (sampleCount < MAX_SAMPLES) {
+      heartRateSamples[sampleCount] = latestHeartRate;
+      breathRateSamples[sampleCount] = latestRespirationRate;
+      sampleCount++;
+    } else {
+      // Dịch mảng sang trái để thêm mẫu mới
+      for (int i = 1; i < MAX_SAMPLES; i++) {
+        heartRateSamples[i-1] = heartRateSamples[i];
+        breathRateSamples[i-1] = breathRateSamples[i];
+      }
+      heartRateSamples[MAX_SAMPLES-1] = latestHeartRate;
+      breathRateSamples[MAX_SAMPLES-1] = latestRespirationRate;
+    }
+    lastSampleTime = millis();
+  }
   if (millis() - lastDisplayUpdate >= displayInterval) {
     updateDisplay();
     lastDisplayUpdate = millis();
   }
   delay(200);
+}
+
+int average(int* arr, int count) {
+  if (count == 0) return 0;
+  int sum = 0;
+  for (int i = 0; i < count; i++) sum += arr[i];
+  return sum / count;
 }
