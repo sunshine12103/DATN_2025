@@ -8,7 +8,7 @@
 #include <PubSubClient.h>
 
 const char* ssid = "Fuvitech";
-const char* password = "fuvitech.vn"; 
+const char* password = "fuvitech.vn";
 
 const char* mqtt_server = "mqtt.fuvitech.vn";
 const int mqtt_port = 2883;
@@ -22,7 +22,7 @@ PubSubClient client(espClient);
 
 BreathHeart_60GHz radar = BreathHeart_60GHz(&Serial2);
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
-DHT dht(32,DHT22); // DHT22 sensor on GPIO 32
+DHT dht(32, DHT22); 
 
 #define MAX_SAMPLES 60
 int heartRateSamples[MAX_SAMPLES];
@@ -38,6 +38,7 @@ int latestDistance = 0;
 float latestTemperature = 0;
 float latestHumidity = 0;
 float latestWeight = 0; 
+float lastWeight = 0; 
 unsigned long lastRadarUpdate = 0;
 const unsigned long radarInterval = 1000;
 const unsigned long displayInterval = 500;
@@ -46,8 +47,9 @@ U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R2, /* clock=*/ 18, /* data=*/ 23, /* CS=*
 
 int dotCount = 0;
 unsigned long lastDotUpdate = 0;
-const unsigned long dotInterval = 500; 
+const unsigned long dotInterval = 500;
 
+// Hàm tính trung bình
 int averageInt(int* arr, int count) {
   if (count == 0) return 0;
   int sum = 0;
@@ -60,6 +62,18 @@ float averageFloat(float* arr, int count) {
   float sum = 0;
   for (int i = 0; i < count; i++) sum += arr[i];
   return sum / count;
+}
+
+// Hàm đặt lại mảng mẫu
+void resetSamples() {
+  sampleCount = 0;
+  for (int i = 0; i < MAX_SAMPLES; i++) {
+    heartRateSamples[i] = 0;
+    breathRateSamples[i] = 0;
+    weightSamples[i] = 0;
+  }
+  dotCount = 0;
+  lastDotUpdate = millis();
 }
 
 // Callback khi nhận tin nhắn MQTT
@@ -114,10 +128,8 @@ void updateDisplay() {
     sprintf(humStr, "%.1f %%", latestHumidity);
     u8g2.drawStr(70, 50, humStr);
   } else {
-    // Nếu Weight_kg > 0, hiển thị nhịp tim, nhịp thở, chiều cao, cân nặng
     u8g2.setFont(u8g2_font_ncenB08_tr);
     if (sampleCount < MAX_SAMPLES) {
-      // Hiển thị "..." trong khi thu thập mẫu
       String dots = "";
       for (int i = 0; i < dotCount; i++) dots += ".";
       u8g2.drawStr(5, 35, "Dang doc");
@@ -152,6 +164,7 @@ void setup() {
   Serial2.begin(115200, SERIAL_8N1, 16, 17);
   while (!Serial);
 
+  // Kết nối Wi-Fi
   Serial.print("Connecting to Wi-Fi...");
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -160,6 +173,7 @@ void setup() {
   }
   Serial.println(" connected");
 
+  // Cấu hình MQTT
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
 
@@ -193,7 +207,6 @@ void loop() {
   }
   client.loop();
 
-  // Đọc VL53L0X
   VL53L0X_RangingMeasurementData_t measure;
   lox.rangingTest(&measure, false); 
   if (measure.RangeStatus != 4) {
@@ -221,13 +234,22 @@ void loop() {
     }
   }
 
-  if (millis() - lastSampleTime >= sampleInterval) {
+  // Kiểm tra thay đổi Weight_kg từ >0 sang 0 để đặt lại
+  if (lastWeight > 0 && latestWeight <= 0) {
+    resetSamples();
+    Serial.println("Weight reset to 0, starting new measurement cycle");
+  }
+  lastWeight = latestWeight;
+
+  // Lấy mẫu mỗi 1 giây nếu Weight_kg > 0
+  if (latestWeight > 0 && millis() - lastSampleTime >= sampleInterval) {
     if (sampleCount < MAX_SAMPLES) {
       heartRateSamples[sampleCount] = latestHeartRate;
       breathRateSamples[sampleCount] = latestRespirationRate;
       weightSamples[sampleCount] = latestWeight;
       sampleCount++;
     } else {
+      // Dịch mảng để thêm mẫu mới
       for (int i = 1; i < MAX_SAMPLES; i++) {
         heartRateSamples[i-1] = heartRateSamples[i];
         breathRateSamples[i-1] = breathRateSamples[i];
