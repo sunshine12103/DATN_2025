@@ -3,15 +3,14 @@
 #include <U8g2lib.h>
 #include <SPI.h>
 #include "Adafruit_VL53L0X.h"
-#include <DHT.h>
+#include "DHT.h"
 
-#define DHT22 32
+#define DHTPIN 32  
 #define RELAY_PIN 33
-#define SOUND_PIN 34
-
+#define DHTTYPE DHT22 
 BreathHeart_60GHz radar = BreathHeart_60GHz(&Serial2);
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
-DHT dht(DHT22, DHT22); 
+DHT dht(DHTPIN, DHTTYPE); 
 
 #define MAX_SAMPLES 60
 int heartRateSamples[MAX_SAMPLES];
@@ -30,35 +29,26 @@ const unsigned long radarInterval = 1000;
 const unsigned long displayInterval = 500;
 unsigned long lastDisplayUpdate = 0;
 U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R2, /* clock=*/ 18, /* data=*/ 23, /* CS=*/ 5, /* reset=*/ 22);
+
 int average(int* arr, int count);
+
 void updateDisplay() {
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB08_tr);
-  u8g2.drawStr(5, 8, "RADAR R60ABD1");
-  u8g2.drawHLine(0, 10, 128);
+  u8g2.setFont(u8g2_font_ncenB10_tr); 
+  u8g2.drawStr(5, 15, "FUVI CAFE");
+  u8g2.drawHLine(0, 20, 128); 
 
-  u8g2.drawStr(5, 20, "Nhip tim:");
-  char heartRateStr[16];
-  sprintf(heartRateStr, "%d bpm", average(heartRateSamples, sampleCount));
-  u8g2.drawStr(70, 20, heartRateStr);
-
-  u8g2.drawStr(5, 30, "Nhip tho:");
-  char respRateStr[16];
-  sprintf(respRateStr, "%d rpm", average(breathRateSamples, sampleCount));
-  u8g2.drawStr(70, 30, respRateStr);
-  u8g2.drawStr(5, 40, "Chieu cao:");
-  char distanceStr[10];
-  sprintf(distanceStr, "%d mm", latestDistance);
-  u8g2.drawStr(70, 40, distanceStr);
-  u8g2.drawStr(5, 50, "Nhiet do:");
+  u8g2.setFont(u8g2_font_ncenB08_tr); 
+  u8g2.drawStr(5, 35, "Nhiet do:");
   char tempStr[10];
   sprintf(tempStr, "%.1f C", latestTemperature);
-  u8g2.drawStr(70, 50, tempStr);
+  u8g2.drawStr(70, 35, tempStr);
   
-  u8g2.drawStr(5, 60, "Do am:");
+  u8g2.drawStr(5, 50, "Do am:");
   char humStr[10];
   sprintf(humStr, "%.1f %%", latestHumidity);
-  u8g2.drawStr(70, 60, humStr);
+  u8g2.drawStr(70, 50, humStr);
+  
   u8g2.sendBuffer();
 }
 
@@ -83,11 +73,12 @@ void setup() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_ncenB10_tr);
   u8g2.drawStr(5, 30, "Khoi dong...");
-  u8g2.drawStr(5, 50, "RADAR R60ABD1");
+  u8g2.drawStr(5, 50, "FUVI CAFE"); // Thay RADAR R60ABD1 bằng FUVI CAFE
   u8g2.sendBuffer();
   delay(2000);
   Serial.println("Radar R60ABD1 Initialized");
 }
+
 void loop() {
   VL53L0X_RangingMeasurementData_t measure;
   Serial.print("Reading a measurement... ");
@@ -100,12 +91,9 @@ void loop() {
     Serial.println(" out of range ");
     latestDistance = 0;
   }
-  float temp = dht.readTemperature();
-  float hum = dht.readHumidity();
-  if (!isnan(temp) && !isnan(hum)) {
-    latestTemperature = temp;
-    latestHumidity = hum;
-  } else {
+  latestTemperature = dht.readTemperature();
+  latestHumidity = dht.readHumidity();
+  if(isnan(latestTemperature) || isnan(latestHumidity)){
     Serial.println("Lỗi đọc cảm biến DHT22!");
   }
   radar.Breath_Heart();        
