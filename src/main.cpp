@@ -23,6 +23,7 @@ const unsigned long radarInterval = 1000;
 const unsigned long displayInterval = 500;
 unsigned long lastDisplayUpdate = 0;
 U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R2, /* clock=*/ 18, /* data=*/ 23, /* CS=*/ 5, /* reset=*/ 22);
+
 void updateDisplay() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_ncenB08_tr);
@@ -31,7 +32,11 @@ void updateDisplay() {
   u8g2.setFont(u8g2_font_ncenB08_tr);
   u8g2.drawStr(5, 20, "Nhip tim:");
   char heartRateStr[10];
-  sprintf(heartRateStr, "%d bpm", latestHeartRate);
+  if (latestHeartRate == 0 || (latestHeartRate >= 60 && latestHeartRate <= 100)) {
+    sprintf(heartRateStr, "%d bpm", latestHeartRate);
+  } else {
+    sprintf(heartRateStr, "Err bpm");
+  }
   u8g2.drawStr(70, 20, heartRateStr);
   
   u8g2.drawStr(5, 30, "Nhip tho:");
@@ -53,6 +58,7 @@ void updateDisplay() {
   u8g2.drawStr(70, 60, humStr);
   u8g2.sendBuffer();
 }
+
 void setup() {
   Serial.begin(115200);
   Serial2.begin(115200, SERIAL_8N1, 16, 17);
@@ -79,6 +85,7 @@ void setup() {
   delay(2000);
   Serial.println("Radar R60ABD1 Initialized");
 }
+
 void loop() {
   VL53L0X_RangingMeasurementData_t measure;
   Serial.print("Reading a measurement... ");
@@ -105,7 +112,11 @@ void loop() {
       case HEARTRATEVAL:
         Serial.print("Sensor monitored the current heart rate value is: ");
         Serial.println(radar.heart_rate, DEC);
-        latestHeartRate = radar.heart_rate;
+        if (radar.heart_rate == 0 || (radar.heart_rate >= 60 && radar.heart_rate <= 100)) {
+          latestHeartRate = radar.heart_rate;
+        } else {
+          Serial.println("Heart rate out of range (60-100 bpm)! Keeping previous value.");
+        }
         Serial.println("----------------------------");
         break;
       case HEARTRATEWAVE:
