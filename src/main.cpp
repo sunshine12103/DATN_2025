@@ -65,14 +65,12 @@ float averageFloat(float* arr, int count) {
   for (int i = 0; i < count; i++) sum += arr[i];  return sum / count;
 }
 
-// Hàm tính BMI
 float calculateBMI(float weight_kg, float height_cm) {
   if (weight_kg <= 0 || height_cm <= 0) return 0;
-  float height_m = height_cm / 100.0; // Chuyển đổi cm sang m
+  float height_m = height_cm / 100.0; 
   return weight_kg / (height_m * height_m);
 }
 
-// Hàm đặt lại mảng mẫu
 void resetSamples() {
   sampleCount = 0;
   for (int i = 0; i < MAX_SAMPLES; i++) {
@@ -84,7 +82,6 @@ void resetSamples() {
   lastDotUpdate = millis();
 }
 
-// Callback khi nhận tin nhắn MQTT
 void callback(char* topic, byte* payload, unsigned int length) {
   String message;
   for (unsigned int i = 0; i < length; i++) {
@@ -121,7 +118,7 @@ void updateDisplay() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_ncenB08_tr);
   u8g2.drawStr(5, 10, "FUVI CAFE");
-  u8g2.drawHLine(0, 15, 128);
+  u8g2.drawHLine(0, 12, 128);
 
   // Nếu Weight_kg <= 0, chỉ hiển thị nhiệt độ và độ ẩm
   if (latestWeight <= 0) {
@@ -141,25 +138,30 @@ void updateDisplay() {
       String dots = "";
       for (int i = 0; i < dotCount; i++) dots += ".";
       u8g2.drawStr(5, 35, "Dang doc");
-      u8g2.drawStr(60, 35, dots.c_str());    } else {      u8g2.drawStr(5, 25, "Nhip tim:");
+      u8g2.drawStr(60, 35, dots.c_str());    } else {      u8g2.drawStr(5,22, "Nhip tim:");
       char heartRateStr[10];
       sprintf(heartRateStr, "%d bpm", averageInt(heartRateSamples, sampleCount));
-      u8g2.drawStr(70, 25, heartRateStr);
+      u8g2.drawStr(70, 22, heartRateStr);
       
-      u8g2.drawStr(5, 35, "Nhip tho:");
+      u8g2.drawStr(5, 32, "Nhip tho:");
       char respRateStr[10];
       sprintf(respRateStr, "%d rpm", averageInt(breathRateSamples, sampleCount));
-      u8g2.drawStr(70, 35, respRateStr);
+      u8g2.drawStr(70, 32, respRateStr);
       
-      u8g2.drawStr(5, 45, "Chieu cao:");
+      u8g2.drawStr(5, 42, "Chieu cao:");
       char heightStr[10];
       sprintf(heightStr, "%.1f cm", latestHeight);
-      u8g2.drawStr(70, 45, heightStr);
-      
-      u8g2.drawStr(5, 55, "BMI:");
+      u8g2.drawStr(70, 42, heightStr);
+
+      u8g2.drawStr(5, 52, "Can nang:");
+      char weightStr[10];
+      sprintf(weightStr, "%.2f kg", latestWeight);
+      u8g2.drawStr(70, 52, weightStr);
+
+      u8g2.drawStr(5,62, "BMI:");
       char bmiStr[10];
       sprintf(bmiStr, "%.1f", latestBMI);
-      u8g2.drawStr(70, 55, bmiStr);
+      u8g2.drawStr(70, 62, bmiStr);
     }
   }
   u8g2.sendBuffer();
@@ -219,7 +221,6 @@ void loop() {
     Serial.print("Distance (mm): "); 
     Serial.println(measure.RangeMilliMeter);
     latestDistance = measure.RangeMilliMeter; 
-    // Tính chiều cao: 2000mm - khoảng cách đo được, đổi sang cm
     latestHeight = (2000 - latestDistance) / 10.0;
   } else {
     Serial.println(" out of range ");
