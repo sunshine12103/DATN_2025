@@ -6,6 +6,7 @@
 #include <DHT.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <EEPROM.h>
 
 const char* ssid = "Fuvitech";
 const char* password = "fuvitech.vn";
@@ -50,6 +51,11 @@ U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R2, /* clock=*/ 18, /* data=*/ 23, /* CS=*
 int dotCount = 0;
 unsigned long lastDotUpdate = 0;
 const unsigned long dotInterval = 500;
+
+// ID cho mỗi lần đọc
+int readingID = 0;
+#define EEPROM_SIZE 512
+#define ID_ADDRESS 0
 
 // Hàm tính trung bình
 int averageInt(int* arr, int count) {
@@ -118,6 +124,12 @@ void updateDisplay() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_ncenB08_tr);
   u8g2.drawStr(5, 10, "FUVI CAFE");
+  
+  // Hiển thị ID
+  char idStr[20];
+  sprintf(idStr, "ID: %d", readingID);
+  u8g2.drawStr(80, 10, idStr);
+  
   u8g2.drawHLine(0, 12, 128);
 
   // Nếu Weight_kg <= 0, chỉ hiển thị nhiệt độ và độ ẩm
@@ -171,6 +183,20 @@ void setup() {
   Serial.begin(115200);
   Serial2.begin(115200, SERIAL_8N1, 16, 17);
   while (!Serial);
+
+  // Khởi tạo EEPROM và đọc ID đã lưu
+  EEPROM.begin(EEPROM_SIZE);
+  readingID = EEPROM.readInt(ID_ADDRESS);
+  
+  // Nếu lần đầu sử dụng hoặc giá trị không hợp lệ
+  if (readingID < 0 || readingID > 99999) {
+    readingID = 0;
+    EEPROM.writeInt(ID_ADDRESS, readingID);
+    EEPROM.commit();
+  }
+  
+  Serial.print("Current Reading ID: ");
+  Serial.println(readingID);
 
   // Kết nối Wi-Fi
   Serial.print("Connecting to Wi-Fi...");
@@ -300,13 +326,21 @@ void loop() {
         break;
     }
   }
-
-  // Kiểm tra thay đổi Weight_kg từ >0 sang 0 để đặt lại
-  if (lastWeight > 0 && latestWeight <= 0) {
+  // Kiểm tra thay đổi cân nặng
+  if (lastWeight <= 0 && latestWeight > 0) {
+    // Có người lên cân - tăng ID và bắt đầu chu kỳ đo mới
+    readingID++;
+    EEPROM.writeInt(ID_ADDRESS, readingID);
+    EEPROM.commit();
     resetSamples();
-    Serial.println("Weight reset to 0, starting new measurement cycle");
+    Serial.print("New person detected, Reading ID: ");
+    Serial.println(readingID);
+  } else if (lastWeight > 0 && latestWeight <= 0) {
+    // Người xuống cân - chỉ reset samples không tăng ID
+    resetSamples();
+    Serial.println("Person left, samples reset");
   }
-  lastWeight = latestWeight;  // Lấy mẫu mỗi 1 giây nếu Weight_kg > 0
+  lastWeight = latestWeight;// Lấy mẫu mỗi 1 giây nếu Weight_kg > 0
   if (latestWeight > 0 && millis() - lastSampleTime >= sampleInterval) {
     // Tính BMI
     latestBMI = calculateBMI(averageFloat(weightSamples, sampleCount > 0 ? sampleCount : 1), latestHeight);
