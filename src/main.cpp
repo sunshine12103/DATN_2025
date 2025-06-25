@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <EEPROM.h>
+#include <HTTPClient.h>
 
 const char* ssid = "Fuvitech";
 const char* password = "fuvitech.vn";
@@ -14,6 +15,8 @@ const char* password = "fuvitech.vn";
 const char* mqtt_server = "mqtt.fuvitech.vn";
 const int mqtt_port = 2883;
 const char* mqtt_topic = "DATN/Weight";
+
+const char* googleSheetURL = "https://script.google.com/macros/s/AKfycbyYJFEGPPYTb83H18Cnq9gZz9j6UpJFz3RsDjG73x24Oj1IIm02Y7y_Wp5pEuYrlvTEGw/exec";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -25,7 +28,7 @@ BreathHeart_60GHz radar = BreathHeart_60GHz(&Serial2);
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 DHT dht(32, DHT22); 
 
-#define MAX_SAMPLES 60
+#define MAX_SAMPLES 120
 int heartRateSamples[MAX_SAMPLES];
 int breathRateSamples[MAX_SAMPLES];
 float weightSamples[MAX_SAMPLES];
@@ -36,7 +39,7 @@ const unsigned long sampleInterval = 1000;
 int latestHeartRate = 0;
 int latestRespirationRate = 0;
 int latestDistance = 0; 
-float latestHeight = 0; // Chiều cao tính toán (cm)
+float latestHeight = 0; 
 float latestTemperature = 0;
 float latestHumidity = 0; 
 float latestWeight = 0; 
@@ -52,12 +55,11 @@ int dotCount = 0;
 unsigned long lastDotUpdate = 0;
 const unsigned long dotInterval = 500;
 
-// ID cho mỗi lần đọc
 int readingID = 0;
 #define EEPROM_SIZE 512
 #define ID_ADDRESS 0
+bool hasLogged = false; // Cờ để kiểm soát việc gửi dữ liệu lên Google Sheet
 
-// Hàm tính trung bình
 int averageInt(int* arr, int count) {
   if (count == 0) return 0;
   int sum = 0;
@@ -68,7 +70,8 @@ int averageInt(int* arr, int count) {
 float averageFloat(float* arr, int count) {
   if (count == 0) return 0;
   float sum = 0;
-  for (int i = 0; i < count; i++) sum += arr[i];  return sum / count;
+  for (int i = 0; i < count; i++) sum += arr[i];  
+  return sum / count;
 }
 
 float calculateBMI(float weight_kg, float height_cm) {
@@ -86,6 +89,7 @@ void resetSamples() {
   }
   dotCount = 0;
   lastDotUpdate = millis();
+  hasLogged = false; // Reset cờ khi reset mẫu
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -98,11 +102,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("]: ");
   Serial.println(message);
   
-  // Chuyển đổi message thành float (Weight_kg)
   latestWeight = message.toFloat();
 }
 
-// Kết nối MQTT
 void reconnect() {
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
@@ -119,30 +121,65 @@ void reconnect() {
   }
 }
 
-// Hàm cập nhật màn hình
+void logDataToGoogleSheet(int id, int heartRate, int breathRate, float height, float weight, float bmi) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected");
+    return;
+  }
+
+  if (heartRate <= 0 || breathRate <= 0 || height <= 0 || weight <= 0 || bmi <= 0) {
+    Serial.println("Invalid sensor data, skipping Google Sheet log");
+    return;
+  }
+
+  HTTPClient http;
+  
+  Serial.println("Logging data to Google Sheet...");
+  http.begin(googleSheetURL);
+  http.addHeader("Content-Type", "application/json");
+
+  String jsonPayload = "{\"ID\":" + String(readingID) +
+                       ",\"HeartRate\":" + String(heartRate) +
+                       ",\"BreathRate\":" + String(breathRate) +
+                       ",\"Height\":" + String(height, 1) +
+                       ",\"Weight\":" + String(weight, 2) +
+                       ",\"BMI\":" + String(bmi, 1) + "}";
+
+  int httpResponseCode = http.POST(jsonPayload);
+  
+  if (httpResponseCode > 0) {
+    String response = http.getString();
+    Serial.println("HTTP Response code: " + String(httpResponseCode));
+    Serial.println("Response: " + response);
+  } else {
+    Serial.print("Error code: ");
+    Serial.println(httpResponseCode);
+  }
+  
+  http.end();
+}
+
 void updateDisplay() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_ncenB08_tr);
   u8g2.drawStr(5, 10, "FUVI CAFE");
   
-  // Hiển thị ID
   char idStr[20];
   sprintf(idStr, "ID: %d", readingID);
   u8g2.drawStr(80, 10, idStr);
   
   u8g2.drawHLine(0, 12, 128);
 
-  // Nếu Weight_kg <= 0, chỉ hiển thị nhiệt độ và độ ẩm
   if (latestWeight <= 0) {
     u8g2.setFont(u8g2_font_ncenB08_tr);
     u8g2.drawStr(5, 35, "Nhiet do:");
-  char tempStr[10];
-  sprintf(tempStr, "%.1f C", latestTemperature);
+    char tempStr[10];
+    sprintf(tempStr, "%.1f C", latestTemperature);
     u8g2.drawStr(70, 35, tempStr);
   
     u8g2.drawStr(5, 50, "Do am:");
-  char humStr[10];
-  sprintf(humStr, "%.1f %%", latestHumidity);
+    char humStr[10];
+    sprintf(humStr, "%.1f %%", latestHumidity);
     u8g2.drawStr(70, 50, humStr);
   } else {
     u8g2.setFont(u8g2_font_ncenB08_tr);
@@ -150,7 +187,9 @@ void updateDisplay() {
       String dots = "";
       for (int i = 0; i < dotCount; i++) dots += ".";
       u8g2.drawStr(5, 35, "Dang doc");
-      u8g2.drawStr(60, 35, dots.c_str());    } else {      u8g2.drawStr(5,22, "Nhip tim:");
+      u8g2.drawStr(60, 35, dots.c_str());
+    } else {
+      u8g2.drawStr(5, 22, "Nhip tim:");
       char heartRateStr[10];
       sprintf(heartRateStr, "%d bpm", averageInt(heartRateSamples, sampleCount));
       u8g2.drawStr(70, 22, heartRateStr);
@@ -170,7 +209,7 @@ void updateDisplay() {
       sprintf(weightStr, "%.2f kg", latestWeight);
       u8g2.drawStr(70, 52, weightStr);
 
-      u8g2.drawStr(5,62, "BMI:");
+      u8g2.drawStr(5, 62, "BMI:");
       char bmiStr[10];
       sprintf(bmiStr, "%.1f", latestBMI);
       u8g2.drawStr(70, 62, bmiStr);
@@ -184,11 +223,9 @@ void setup() {
   Serial2.begin(115200, SERIAL_8N1, 16, 17);
   while (!Serial);
 
-  // Khởi tạo EEPROM và đọc ID đã lưu
   EEPROM.begin(EEPROM_SIZE);
   readingID = EEPROM.readInt(ID_ADDRESS);
   
-  // Nếu lần đầu sử dụng hoặc giá trị không hợp lệ
   if (readingID < 0 || readingID > 99999) {
     readingID = 0;
     EEPROM.writeInt(ID_ADDRESS, readingID);
@@ -198,8 +235,7 @@ void setup() {
   Serial.print("Current Reading ID: ");
   Serial.println(readingID);
 
-  // Kết nối Wi-Fi
-  Serial.print("Connecting to Wi-Fi...");
+  Serial.print("Connecting to WiFi...");
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
@@ -207,7 +243,6 @@ void setup() {
   }
   Serial.println(" connected");
 
-  // Cấu hình MQTT
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
 
@@ -240,6 +275,7 @@ void loop() {
     reconnect();
   }
   client.loop();
+
   VL53L0X_RangingMeasurementData_t measure;
   Serial.print("Reading a measurement... ");
   lox.rangingTest(&measure, false); 
@@ -326,9 +362,8 @@ void loop() {
         break;
     }
   }
-  // Kiểm tra thay đổi cân nặng
+
   if (lastWeight <= 0 && latestWeight > 0) {
-    // Có người lên cân - tăng ID và bắt đầu chu kỳ đo mới
     readingID++;
     EEPROM.writeInt(ID_ADDRESS, readingID);
     EEPROM.commit();
@@ -336,13 +371,12 @@ void loop() {
     Serial.print("New person detected, Reading ID: ");
     Serial.println(readingID);
   } else if (lastWeight > 0 && latestWeight <= 0) {
-    // Người xuống cân - chỉ reset samples không tăng ID
     resetSamples();
     Serial.println("Person left, samples reset");
   }
-  lastWeight = latestWeight;// Lấy mẫu mỗi 1 giây nếu Weight_kg > 0
+  lastWeight = latestWeight;
+
   if (latestWeight > 0 && millis() - lastSampleTime >= sampleInterval) {
-    // Tính BMI
     latestBMI = calculateBMI(averageFloat(weightSamples, sampleCount > 0 ? sampleCount : 1), latestHeight);
     
     if (sampleCount < MAX_SAMPLES) {
@@ -350,22 +384,20 @@ void loop() {
       breathRateSamples[sampleCount] = latestRespirationRate;
       weightSamples[sampleCount] = latestWeight;
       sampleCount++;
-    } else {
-      // Dịch mảng để thêm mẫu mới
-      for (int i = 1; i < MAX_SAMPLES; i++) {
-        heartRateSamples[i-1] = heartRateSamples[i];
-        breathRateSamples[i-1] = breathRateSamples[i];
-        weightSamples[i-1] = weightSamples[i];
-      }
-      heartRateSamples[MAX_SAMPLES-1] = latestHeartRate;
-      breathRateSamples[MAX_SAMPLES-1] = latestRespirationRate;
-      weightSamples[MAX_SAMPLES-1] = latestWeight;
+    } else if (!hasLogged) {
+      // Gửi dữ liệu lên Google Sheet chỉ một lần khi sampleCount >= MAX_SAMPLES
+      int avgHeartRate = averageInt(heartRateSamples, sampleCount);
+      int avgBreathRate = averageInt(breathRateSamples, sampleCount);
+      float avgWeight = averageFloat(weightSamples, sampleCount);
+      float avgBMI = calculateBMI(avgWeight, latestHeight);
+      logDataToGoogleSheet(readingID, avgHeartRate, avgBreathRate, latestHeight, avgWeight, avgBMI);
+      hasLogged = true; // Đánh dấu đã gửi dữ liệu
     }
     lastSampleTime = millis();
   }
 
   if (millis() - lastDotUpdate >= dotInterval) {
-    dotCount = (dotCount % 3) + 1; // 1, 2, 3, rồi lặp
+    dotCount = (dotCount % 3) + 1;
     lastDotUpdate = millis();
   }
 
