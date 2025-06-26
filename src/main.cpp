@@ -16,7 +16,7 @@ const char* mqtt_server = "mqtt.fuvitech.vn";
 const int mqtt_port = 2883;
 const char* mqtt_topic = "DATN/Weight";
 
-const char* googleSheetURL = "https://script.google.com/macros/s/AKfycbyYJFEGPPYTb83H18Cnq9gZz9j6UpJFz3RsDjG73x24Oj1IIm02Y7y_Wp5pEuYrlvTEGw/exec";
+const char* googleSheetURL = "https://script.google.com/macros/s/AKfycbzGbXIt-b_FD_iVvTMfj-FrVv5y3el6qsaiQVEptZQ6OAKeTrArqXx_GqjMkb1pOGyJ5A/exec";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -28,7 +28,7 @@ BreathHeart_60GHz radar = BreathHeart_60GHz(&Serial2);
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 DHT dht(32, DHT22); 
 
-#define MAX_SAMPLES 120
+#define MAX_SAMPLES 60
 int heartRateSamples[MAX_SAMPLES];
 int breathRateSamples[MAX_SAMPLES];
 float weightSamples[MAX_SAMPLES];
@@ -138,7 +138,7 @@ void logDataToGoogleSheet(int id, int heartRate, int breathRate, float height, f
   http.begin(googleSheetURL);
   http.addHeader("Content-Type", "application/json");
 
-  String jsonPayload = "{\"ID\":" + String(readingID) +
+  String jsonPayload = "{\"ID\":" + String(id) +
                        ",\"HeartRate\":" + String(heartRate) +
                        ",\"BreathRate\":" + String(breathRate) +
                        ",\"Height\":" + String(height, 1) +
@@ -151,6 +151,12 @@ void logDataToGoogleSheet(int id, int heartRate, int breathRate, float height, f
     String response = http.getString();
     Serial.println("HTTP Response code: " + String(httpResponseCode));
     Serial.println("Response: " + response);
+    // Xử lý phản hồi JSON (tùy chọn)
+    if (response.indexOf("\"status\":\"success\"") != -1) {
+      Serial.println("Data logged successfully");
+    } else {
+      Serial.println("Failed to log data");
+    }
   } else {
     Serial.print("Error code: ");
     Serial.println(httpResponseCode);
@@ -164,9 +170,12 @@ void updateDisplay() {
   u8g2.setFont(u8g2_font_ncenB08_tr);
   u8g2.drawStr(5, 10, "FUVI CAFE");
   
-  char idStr[20];
-  sprintf(idStr, "ID: %d", readingID);
-  u8g2.drawStr(80, 10, idStr);
+  // Chỉ hiển thị ID khi có cân nặng
+  if (latestWeight > 0) {
+    char idStr[20];
+    sprintf(idStr, "ID: %d", readingID);
+    u8g2.drawStr(80, 10, idStr);
+  }
   
   u8g2.drawHLine(0, 12, 128);
 
@@ -384,14 +393,26 @@ void loop() {
       breathRateSamples[sampleCount] = latestRespirationRate;
       weightSamples[sampleCount] = latestWeight;
       sampleCount++;
-    } else if (!hasLogged) {
-      // Gửi dữ liệu lên Google Sheet chỉ một lần khi sampleCount >= MAX_SAMPLES
-      int avgHeartRate = averageInt(heartRateSamples, sampleCount);
-      int avgBreathRate = averageInt(breathRateSamples, sampleCount);
-      float avgWeight = averageFloat(weightSamples, sampleCount);
-      float avgBMI = calculateBMI(avgWeight, latestHeight);
-      logDataToGoogleSheet(readingID, avgHeartRate, avgBreathRate, latestHeight, avgWeight, avgBMI);
-      hasLogged = true; // Đánh dấu đã gửi dữ liệu
+    } else {
+      // Gửi dữ liệu lên Google Sheet chỉ một lần khi đủ samples
+      if (!hasLogged) {
+        int avgHeartRate = averageInt(heartRateSamples, sampleCount);
+        int avgBreathRate = averageInt(breathRateSamples, sampleCount);
+        float avgWeight = averageFloat(weightSamples, sampleCount);
+        float avgBMI = calculateBMI(avgWeight, latestHeight);
+        logDataToGoogleSheet(readingID, avgHeartRate, avgBreathRate, latestHeight, avgWeight, avgBMI);
+        hasLogged = true; // Đánh dấu đã gửi dữ liệu
+      }
+      
+      // Tiếp tục cập nhật mẫu mới nhất (sliding window)
+      for (int i = 1; i < MAX_SAMPLES; i++) {
+        heartRateSamples[i-1] = heartRateSamples[i];
+        breathRateSamples[i-1] = breathRateSamples[i];
+        weightSamples[i-1] = weightSamples[i];
+      }
+      heartRateSamples[MAX_SAMPLES-1] = latestHeartRate;
+      breathRateSamples[MAX_SAMPLES-1] = latestRespirationRate;
+      weightSamples[MAX_SAMPLES-1] = latestWeight;
     }
     lastSampleTime = millis();
   }
