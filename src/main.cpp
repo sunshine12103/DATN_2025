@@ -183,22 +183,19 @@ void displayQRCode() {
   u8g2.clearBuffer();
   
   // Chuỗi dữ liệu cho mã QR - link rút gọn
-  String qrData = "https://lnk.ink/trO4R";
+  String qrData = "https://byvn.net/GJQA";
   
   // Tạo mã QR với phiên bản nhỏ hơn cho URL ngắn
   uint8_t qrcodeData[qrcode_getBufferSize(2)]; // Phiên bản QR 2 (25x25) cho URL ngắn
   qrcode_initText(&qrcode, qrcodeData, 2, ECC_LOW, qrData.c_str());
 
-  // Vẽ tiêu đề
-  u8g2.setFont(u8g2_font_ncenB08_tr);
-  u8g2.drawStr(20, 10, "Ket qua da gui!");
   
   // Tính toán để căn giữa QR code - nhỏ hơn để vừa màn hình
   uint8_t qr_pixel_size = 1; // Mỗi module QR = 1x1 pixel để vừa màn hình
   uint8_t qr_display_size = qrcode.size * qr_pixel_size; // 25x25 pixel
   uint8_t x_offset = (128 - qr_display_size) / 2; // Căn giữa theo chiều ngang
-  uint8_t y_offset = 15; // Bắt đầu từ y=15 để không đè lên chữ
-  
+  uint8_t y_offset = 10; // Bắt đầu từ y=10 để không đè lên chữ
+
   for (uint8_t y = 0; y < qrcode.size; y++) {
     for (uint8_t x = 0; x < qrcode.size; x++) {
       if (qrcode_getModule(&qrcode, x, y)) {
@@ -210,7 +207,7 @@ void displayQRCode() {
   
   // Thêm text hướng dẫn bên dưới QR
   u8g2.setFont(u8g2_font_ncenB08_tr);
-  u8g2.drawStr(15, 55, "Quet de xem chi tiet");
+  u8g2.drawStr(10, 55, "Scan to view details");
   
   u8g2.sendBuffer();
 }
@@ -240,47 +237,47 @@ void updateDisplay() {
 
   if (latestWeight <= 0) {
     u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(5, 35, "Nhiet do:");
+    u8g2.drawStr(5, 35, "Temperature:");
     char tempStr[10];
     sprintf(tempStr, "%.1f C", latestTemperature);
-    u8g2.drawStr(70, 35, tempStr);
-  
-    u8g2.drawStr(5, 50, "Do am:");
+    u8g2.drawStr(80, 35, tempStr);
+
+    u8g2.drawStr(5, 50, "Humidity:");
     char humStr[10];
     sprintf(humStr, "%.1f %%", latestHumidity);
-    u8g2.drawStr(70, 50, humStr);
+    u8g2.drawStr(80, 50, humStr);
   } else {
     u8g2.setFont(u8g2_font_ncenB08_tr);
     if (sampleCount < MAX_SAMPLES) {
       String dots = "";
       for (int i = 0; i < dotCount; i++) dots += ".";
-      u8g2.drawStr(5, 35, "Dang doc");
-      u8g2.drawStr(60, 35, dots.c_str());
+      u8g2.drawStr(5, 35, "Reading");
+      u8g2.drawStr(55, 35, dots.c_str());
     } else {
-      u8g2.drawStr(5, 22, "Nhip tim:");
+      u8g2.drawStr(5, 22, "Heart Rate:");
       char heartRateStr[10];
       sprintf(heartRateStr, "%d bpm", averageInt(heartRateSamples, sampleCount));
-      u8g2.drawStr(70, 22, heartRateStr);
+      u8g2.drawStr(75, 22, heartRateStr);
       
-      u8g2.drawStr(5, 32, "Nhip tho:");
+      u8g2.drawStr(5, 32, "Breath Rate:");
       char respRateStr[10];
       sprintf(respRateStr, "%d rpm", averageInt(breathRateSamples, sampleCount));
-      u8g2.drawStr(70, 32, respRateStr);
+      u8g2.drawStr(75, 32, respRateStr);
       
-      u8g2.drawStr(5, 42, "Chieu cao:");
+      u8g2.drawStr(5, 42, "Height:");
       char heightStr[10];
       sprintf(heightStr, "%.1f cm", latestHeight);
-      u8g2.drawStr(70, 42, heightStr);
+      u8g2.drawStr(75, 42, heightStr);
 
-      u8g2.drawStr(5, 52, "Can nang:");
+      u8g2.drawStr(5, 52, "Weight:");
       char weightStr[10];
       sprintf(weightStr, "%.2f kg", latestWeight);
-      u8g2.drawStr(70, 52, weightStr);
+      u8g2.drawStr(75, 52, weightStr);
 
       u8g2.drawStr(5, 62, "BMI:");
       char bmiStr[10];
       sprintf(bmiStr, "%.1f", latestBMI);
-      u8g2.drawStr(70, 62, bmiStr);
+      u8g2.drawStr(75, 62, bmiStr);
     }
   }
   u8g2.sendBuffer();
@@ -331,7 +328,7 @@ void setup() {
   
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_ncenB10_tr);
-  u8g2.drawStr(5, 30, "Khoi dong...");
+  u8g2.drawStr(5, 30, "Starting...");
   u8g2.drawStr(5, 50, "FUVI CAFE");
   u8g2.sendBuffer();
   delay(2000);
