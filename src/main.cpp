@@ -2,6 +2,7 @@
 #include <60ghzbreathheart.h>
 #include <U8g2lib.h>
 #include <SPI.h>
+#include <QRCode.h>
 #include "Adafruit_VL53L0X.h"
 #include <DHT.h>
 #include <WiFi.h>
@@ -51,6 +52,9 @@ const unsigned long displayInterval = 500;
 unsigned long lastDisplayUpdate = 0;
 U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R2, /* clock=*/ 18, /* data=*/ 23, /* CS=*/ 5, /* reset=*/ 22);
 
+// Khởi tạo đối tượng QRCode
+QRCode qrcode;
+
 int dotCount = 0;
 unsigned long lastDotUpdate = 0;
 const unsigned long dotInterval = 500;
@@ -58,7 +62,12 @@ const unsigned long dotInterval = 500;
 int readingID = 0;
 #define EEPROM_SIZE 512
 #define ID_ADDRESS 0
-bool hasLogged = false; // Cờ để kiểm soát việc gửi dữ liệu lên Google Sheet
+bool hasLogged = false;
+
+// Biến cho QR code display
+bool showQRCode = false;
+unsigned long qrStartTime = 0;
+const unsigned long qrDisplayDuration = 10000; // 10 giây
 
 int averageInt(int* arr, int count) {
   if (count == 0) return 0;
@@ -89,7 +98,8 @@ void resetSamples() {
   }
   dotCount = 0;
   lastDotUpdate = millis();
-  hasLogged = false; // Reset cờ khi reset mẫu
+  hasLogged = false;
+  showQRCode = false; // Reset QR code display
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -151,11 +161,15 @@ void logDataToGoogleSheet(int id, int heartRate, int breathRate, float height, f
     String response = http.getString();
     Serial.println("HTTP Response code: " + String(httpResponseCode));
     Serial.println("Response: " + response);
-    // Xử lý phản hồi JSON (tùy chọn)
-    if (response.indexOf("\"status\":\"success\"") != -1) {
-      Serial.println("Data logged successfully");
+    
+    // Google Apps Script thường trả về 200 hoặc 302 (redirect) khi thành công
+    if (httpResponseCode == 200 || httpResponseCode == 302) {
+      Serial.println("Data logged successfully to Google Sheet");
+      // Kích hoạt hiển thị QR code sau khi gửi thành công
+      showQRCode = true;
+      qrStartTime = millis();
     } else {
-      Serial.println("Failed to log data");
+      Serial.println("Failed to log data - unexpected response code");
     }
   } else {
     Serial.print("Error code: ");
@@ -165,12 +179,57 @@ void logDataToGoogleSheet(int id, int heartRate, int breathRate, float height, f
   http.end();
 }
 
+void displayQRCode() {
+  u8g2.clearBuffer();
+  
+  // Chuỗi dữ liệu cho mã QR - link rút gọn
+  String qrData = "https://lnk.ink/trO4R";
+  
+  // Tạo mã QR với phiên bản nhỏ hơn cho URL ngắn
+  uint8_t qrcodeData[qrcode_getBufferSize(2)]; // Phiên bản QR 2 (25x25) cho URL ngắn
+  qrcode_initText(&qrcode, qrcodeData, 2, ECC_LOW, qrData.c_str());
+
+  // Vẽ tiêu đề
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+  u8g2.drawStr(20, 10, "Ket qua da gui!");
+  
+  // Tính toán để căn giữa QR code - nhỏ hơn để vừa màn hình
+  uint8_t qr_pixel_size = 1; // Mỗi module QR = 1x1 pixel để vừa màn hình
+  uint8_t qr_display_size = qrcode.size * qr_pixel_size; // 25x25 pixel
+  uint8_t x_offset = (128 - qr_display_size) / 2; // Căn giữa theo chiều ngang
+  uint8_t y_offset = 15; // Bắt đầu từ y=15 để không đè lên chữ
+  
+  for (uint8_t y = 0; y < qrcode.size; y++) {
+    for (uint8_t x = 0; x < qrcode.size; x++) {
+      if (qrcode_getModule(&qrcode, x, y)) {
+        // Vẽ module QR với kích thước 1x1 pixel
+        u8g2.drawPixel(x + x_offset, y + y_offset);
+      }
+    }
+  }
+  
+  // Thêm text hướng dẫn bên dưới QR
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+  u8g2.drawStr(15, 55, "Quet de xem chi tiet");
+  
+  u8g2.sendBuffer();
+}
+
 void updateDisplay() {
+  // Kiểm tra xem có cần hiển thị QR code không
+  if (showQRCode) {
+    if (millis() - qrStartTime < qrDisplayDuration) {
+      displayQRCode();
+      return;
+    } else {
+      showQRCode = false; // Tắt QR code sau 10 giây
+    }
+  }
+  
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_ncenB08_tr);
   u8g2.drawStr(5, 10, "FUVI CAFE");
   
-  // Chỉ hiển thị ID khi có cân nặng
   if (latestWeight > 0) {
     char idStr[20];
     sprintf(idStr, "ID: %d", readingID);
