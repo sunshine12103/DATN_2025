@@ -259,10 +259,22 @@ void updateDisplay() {
   } else {
     u8g2.setFont(u8g2_font_ncenB08_tr);
     if (sampleCount < MAX_SAMPLES) {
-      String dots = "";
-      for (int i = 0; i < dotCount; i++) dots += ".";
-      u8g2.drawStr(5, 35, "Reading");
-      u8g2.drawStr(55, 35, dots.c_str());
+      // Hiệu ứng progress bar
+      u8g2.setFont(u8g2_font_ncenB08_tr);
+      u8g2.drawStr(5, 25, "Health Scanning...");
+      
+      // Progress bar
+      int progress = (sampleCount * 100) / MAX_SAMPLES;
+      u8g2.drawFrame(5, 30, 118, 8); // Khung progress bar
+      u8g2.drawBox(7, 32, (progress * 114) / 100, 4); // Thanh tiến trình
+      
+      // Hiển thị phần trăm
+      char progressStr[10];
+      sprintf(progressStr, "%d%%", progress);
+      u8g2.drawStr(90, 50, progressStr);
+      
+      // Dấu chấm động theo thời gian
+
     } else {
       u8g2.drawStr(5, 22, "Heart Rate:");
       char heartRateStr[10];
