@@ -9,6 +9,7 @@
 #include <PubSubClient.h>
 #include <EEPROM.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
 
 const char* ssid = "Fuvitech";
 const char* password = "fuvitech.vn";
@@ -16,6 +17,7 @@ const char* password = "fuvitech.vn";
 const char* mqtt_server = "mqtt.fuvitech.vn";
 const int mqtt_port = 2883;
 const char* mqtt_topic = "DATN/Weight";
+const char* mqtt_sensor_topic = "DATN/VALUESENSOR"; // Topic cho sensor data
 
 const char* googleSheetURL = "https://script.google.com/macros/s/AKfycbzGbXIt-b_FD_iVvTMfj-FrVv5y3el6qsaiQVEptZQ6OAKeTrArqXx_GqjMkb1pOGyJ5A/exec";
 
@@ -63,11 +65,15 @@ int readingID = 0;
 #define EEPROM_SIZE 512
 #define ID_ADDRESS 0
 bool hasLogged = false;
+bool hasSentMQTT = false; // Cờ để kiểm soát việc gửi MQTT
 
 // Biến cho QR code display
 bool showQRCode = false;
 unsigned long qrStartTime = 0;
 const unsigned long qrDisplayDuration = 10000; // 10 giây
+
+// Function declarations
+void sendSensorDataToMQTT(int id, int heartRate, int breathRate, float height, float weight, float bmi);
 
 int averageInt(int* arr, int count) {
   if (count == 0) return 0;
@@ -99,6 +105,7 @@ void resetSamples() {
   dotCount = 0;
   lastDotUpdate = millis();
   hasLogged = false;
+  hasSentMQTT = false; // Reset cờ MQTT
   showQRCode = false; // Reset QR code display
 }
 
@@ -165,7 +172,11 @@ void logDataToGoogleSheet(int id, int heartRate, int breathRate, float height, f
     // Google Apps Script thường trả về 200 hoặc 302 (redirect) khi thành công
     if (httpResponseCode == 200 || httpResponseCode == 302) {
       Serial.println("Data logged successfully to Google Sheet");
-      // Kích hoạt hiển thị QR code sau khi gửi thành công
+      
+      // Gửi dữ liệu lên MQTT trước khi hiển thị QR
+      sendSensorDataToMQTT(id, heartRate, breathRate, height, weight, bmi);
+      
+      // Sau khi gửi MQTT xong mới kích hoạt hiển thị QR code
       showQRCode = true;
       qrStartTime = millis();
     } else {
@@ -182,7 +193,6 @@ void logDataToGoogleSheet(int id, int heartRate, int breathRate, float height, f
 void displayQRCode() {
   u8g2.clearBuffer();
   
-  // Chuỗi dữ liệu cho mã QR - link rút gọn
   String qrData = "https://byvn.net/GJQA";
   
   // Tạo mã QR với phiên bản nhỏ hơn cho URL ngắn
@@ -467,14 +477,15 @@ void loop() {
       weightSamples[sampleCount] = latestWeight;
       sampleCount++;
     } else {
-      // Gửi dữ liệu lên Google Sheet chỉ một lần khi đủ samples
-      if (!hasLogged) {
+      // Gửi dữ liệu lên Google Sheet và MQTT chỉ một lần khi đủ samples
+      if (!hasLogged && !hasSentMQTT) {
         int avgHeartRate = averageInt(heartRateSamples, sampleCount);
         int avgBreathRate = averageInt(breathRateSamples, sampleCount);
         float avgWeight = averageFloat(weightSamples, sampleCount);
         float avgBMI = calculateBMI(avgWeight, latestHeight);
         logDataToGoogleSheet(readingID, avgHeartRate, avgBreathRate, latestHeight, avgWeight, avgBMI);
         hasLogged = true; // Đánh dấu đã gửi dữ liệu
+        hasSentMQTT = true; // Đánh dấu đã gửi MQTT
       }
       
       // Tiếp tục cập nhật mẫu mới nhất (sliding window)
@@ -500,4 +511,37 @@ void loop() {
     lastDisplayUpdate = millis();
   }
   delay(200);
+}
+
+void sendSensorDataToMQTT(int id, int heartRate, int breathRate, float height, float weight, float bmi) {
+  if (!client.connected()) {
+    Serial.println("MQTT not connected, cannot send sensor data");
+    return;
+  }
+
+  // Tạo JSON object
+  StaticJsonDocument<200> doc;
+  doc["ID"] = id;
+  doc["HeartRate"] = heartRate;
+  doc["BreathRate"] = breathRate;
+  doc["Height"] = round(height * 10) / 10.0; // Làm tròn 1 chữ số thập phân
+  doc["Weight"] = round(weight * 100) / 100.0; // Làm tròn 2 chữ số thập phân
+  doc["BMI"] = round(bmi * 10) / 10.0; // Làm tròn 1 chữ số thập phân
+
+  // Serialize JSON thành string
+  String jsonString;
+  serializeJson(doc, jsonString);
+
+  // Gửi lên MQTT
+  Serial.println("Sending sensor data to MQTT...");
+  Serial.print("Topic: ");
+  Serial.println(mqtt_sensor_topic);
+  Serial.print("Data: ");
+  Serial.println(jsonString);
+
+  if (client.publish(mqtt_sensor_topic, jsonString.c_str())) {
+    Serial.println("Sensor data sent to MQTT successfully");
+  } else {
+    Serial.println("Failed to send sensor data to MQTT");
+  }
 }
