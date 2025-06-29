@@ -302,9 +302,26 @@ void setup() {
 
   Serial.print("Connecting to WiFi...");
   WiFi.begin(ssid, password);
+  
+  unsigned long wifiStartTime = millis();
+  const unsigned long wifiTimeout = 5000; // 5 giây timeout
+  
   while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
+    delay(500);
     Serial.print(".");
+    
+    // Kiểm tra timeout
+    if (millis() - wifiStartTime > wifiTimeout) {
+      Serial.println();
+      Serial.println("WiFi connection timeout! Restarting ESP32...");
+      u8g2.clearBuffer();
+      u8g2.setFont(u8g2_font_ncenB08_tr);
+      u8g2.drawStr(5, 30, "WiFi Timeout!");
+      u8g2.drawStr(5, 45, "Restarting...");
+      u8g2.sendBuffer();
+      delay(2000);
+      ESP.restart(); // Reset ESP32
+    }
   }
   Serial.println(" connected");
 
