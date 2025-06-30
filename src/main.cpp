@@ -39,6 +39,11 @@ int sampleCount = 0;
 unsigned long lastSampleTime = 0;
 const unsigned long sampleInterval = 1000; 
 
+// Thuật toán mới: Lấy mẫu cuối cùng (thứ 60) làm kết quả thay vì trung bình
+// - Thu thập 60 mẫu trong 60 giây
+// - Sử dụng mẫu cuối cùng (mẫu thứ 60) làm kết quả cuối cùng
+// - Điều này giúp có kết quả ổn định hơn sau quá trình đo đạc 
+
 int latestHeartRate = 0;
 int latestRespirationRate = 0;
 int latestDistance = 0; 
@@ -268,22 +273,26 @@ void updateDisplay() {
       u8g2.drawFrame(5, 30, 118, 8); // Khung progress bar
       u8g2.drawBox(7, 32, (progress * 114) / 100, 4); // Thanh tiến trình
       
-      // Hiển thị phần trăm
-      char progressStr[10];
-      sprintf(progressStr, "%d%%", progress);
-      u8g2.drawStr(90, 50, progressStr);
+      // Hiển thị phần trăm và số mẫu
+      char progressStr[20];
+      sprintf(progressStr, "%d%% (%d/60)", progress, sampleCount);
+      u8g2.drawStr(5, 50, progressStr);
+      
+      // Hiển thị thông tin về thuật toán
+      u8g2.drawStr(5, 60, "Final sample used");
       
       // Dấu chấm động theo thời gian
 
     } else {
+      // Hiển thị kết quả cuối cùng (mẫu thứ 60) thay vì trung bình
       u8g2.drawStr(5, 22, "Heart Rate:");
       char heartRateStr[10];
-      sprintf(heartRateStr, "%d bpm", averageInt(heartRateSamples, sampleCount));
+      sprintf(heartRateStr, "%d bpm", heartRateSamples[MAX_SAMPLES-1]);
       u8g2.drawStr(75, 22, heartRateStr);
       
       u8g2.drawStr(5, 32, "Breath Rate:");
       char respRateStr[10];
-      sprintf(respRateStr, "%d rpm", averageInt(breathRateSamples, sampleCount));
+      sprintf(respRateStr, "%d rpm", breathRateSamples[MAX_SAMPLES-1]);
       u8g2.drawStr(75, 32, respRateStr);
       
       u8g2.drawStr(5, 42, "Height:");
@@ -293,12 +302,12 @@ void updateDisplay() {
 
       u8g2.drawStr(5, 52, "Weight:");
       char weightStr[10];
-      sprintf(weightStr, "%.2f kg", latestWeight);
+      sprintf(weightStr, "%.2f kg", weightSamples[MAX_SAMPLES-1]);
       u8g2.drawStr(75, 52, weightStr);
 
       u8g2.drawStr(5, 62, "BMI:");
       char bmiStr[10];
-      sprintf(bmiStr, "%.1f", latestBMI);
+      sprintf(bmiStr, "%.1f", calculateBMI(weightSamples[MAX_SAMPLES-1], latestHeight));
       u8g2.drawStr(75, 62, bmiStr);
     }
   }
@@ -481,7 +490,8 @@ void loop() {
   lastWeight = latestWeight;
 
   if (latestWeight > 0 && millis() - lastSampleTime >= sampleInterval) {
-    latestBMI = calculateBMI(averageFloat(weightSamples, sampleCount > 0 ? sampleCount : 1), latestHeight);
+    // Cập nhật BMI dựa trên trọng lượng hiện tại
+    latestBMI = calculateBMI(latestWeight, latestHeight);
     
     if (sampleCount < MAX_SAMPLES) {
       heartRateSamples[sampleCount] = latestHeartRate;
@@ -491,11 +501,19 @@ void loop() {
     } else {
       // Gửi dữ liệu lên Google Sheet và MQTT chỉ một lần khi đủ samples
       if (!hasLogged && !hasSentMQTT) {
-        int avgHeartRate = averageInt(heartRateSamples, sampleCount);
-        int avgBreathRate = averageInt(breathRateSamples, sampleCount);
-        float avgWeight = averageFloat(weightSamples, sampleCount);
-        float avgBMI = calculateBMI(avgWeight, latestHeight);
-        logDataToGoogleSheet(readingID, avgHeartRate, avgBreathRate, latestHeight, avgWeight, avgBMI);
+        // Thay đổi: Lấy mẫu cuối cùng (thứ 60) thay vì trung bình
+        int finalHeartRate = heartRateSamples[MAX_SAMPLES-1];
+        int finalBreathRate = breathRateSamples[MAX_SAMPLES-1];
+        float finalWeight = weightSamples[MAX_SAMPLES-1];
+        float finalBMI = calculateBMI(finalWeight, latestHeight);
+        
+        Serial.println("Using final sample (60th) as result:");
+        Serial.println("Final Heart Rate: " + String(finalHeartRate));
+        Serial.println("Final Breath Rate: " + String(finalBreathRate));
+        Serial.println("Final Weight: " + String(finalWeight));
+        Serial.println("Final BMI: " + String(finalBMI));
+        
+        logDataToGoogleSheet(readingID, finalHeartRate, finalBreathRate, latestHeight, finalWeight, finalBMI);
         hasLogged = true; // Đánh dấu đã gửi dữ liệu
         hasSentMQTT = true; // Đánh dấu đã gửi MQTT
       }
@@ -532,7 +550,7 @@ void sendSensorDataToMQTT(int id, int heartRate, int breathRate, float height, f
   }
 
   // Tạo JSON object
-  StaticJsonDocument<200> doc;
+  JsonDocument doc;
   doc["ID"] = id;
   doc["HeartRate"] = heartRate;
   doc["BreathRate"] = breathRate;
